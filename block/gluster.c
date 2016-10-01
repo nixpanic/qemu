@@ -1285,11 +1285,74 @@ static int64_t coroutine_fn qemu_gluster_co_get_block_status(
 }
 
 
+static void qemu_gluster_refresh_filename(BlockDriverState *bs, QDict *options)
+{
+    QDict *opts = qdict_new();
+    const char *host = qdict_get_try_str(options, GLUSTER_OPT_HOST);
+    const char *port = qdict_get_try_str(options, GLUSTER_OPT_PORT);
+    const char *socket = qdict_get_try_str(options, GLUSTER_OPT_SOCKET);
+    const char *volume = qdict_get_try_str(options, GLUSTER_OPT_VOLUME);
+    const char *path = qdict_get_try_str(options, GLUSTER_OPT_PATH);
+    QDict *server_options = NULL;
+    size_t num_servers = 0;
+
+    qdict_put_obj(opts, "driver", QOBJECT(qstring_from_str("gluster")));
+
+    if (volume && path && socket) {
+        snprintf(bs->exact_filename, sizeof(bs->exact_filename),
+                 "gluster+unix:///%s/%s?socket=%s", volume, path, socket);
+    } else if (host && port && volume && path) {
+        snprintf(bs->exact_filename, sizeof(bs->exact_filename),
+                 "gluster://%s:%s/%s/%s", host, volume, path);
+    } else if (host && !port && volume && path) {
+        snprintf(bs->exact_filename, sizeof(bs->exact_filename),
+                 "gluster://%s/%s/%s", host, volume, path);
+    } else {
+	/* configured through QAPI, it allows multiple servers, we will only
+         * use the 1st for the URI */
+        num_servers = qdict_array_entries(options, GLUSTER_OPT_SERVER_PATTERN);
+        assert(num_servers >= 1);
+
+        key = snprintf(key, GLUSTER_OPT_SERVER_PATTERN"%d.", 0);
+        qdict_extract_subqdict(options, &server_options, key);
+
+	/* "server.0. GLUSTER_OPT_TYPE */
+        str = qemu_opt_get(options, GLUSTER_OPT_TYPE);
+        switch (qapi_enum_parse(str)) {
+	case GLUSTER_TRANSPORT_UNIX:
+	/* "server.0. GLUSTER_OPT_SOCKET */
+	    break;
+	case GLUSTER_TRANSPORT_TCP:
+	/* "server.0. GLUSTER_OPT_HOST */
+	/* "server.0. GLUSTER_OPT_PORT */
+	    break;
+        default:
+            assert("unknown Gluster protocol");
+        }
+        snprintf(key, );
+    }
+
+    if (socket) {
+        qdict_put_obj(opts, GLUSTER_OPT_SOCKET, QOBJECT(qstring_from_str(socket)));
+    } else if (port) {
+        qdict_put_obj(opts, GLUSTER_OPT_HOST, QOBJECT(qstring_from_str(host)));
+        qdict_put_obj(opts, GLUSTER_OPT_PORT, QOBJECT(qstring_from_str(port)));
+    } else {
+        qdict_put_obj(opts, GLUSTER_OPT_HOST, QOBJECT(qstring_from_str(host)));
+    }
+    qdict_put_obj(opts, GLUSTER_OPT_VOLUME, QOBJECT(qstring_from_str(volume)));
+    qdict_put_obj(opts, GLUSTER_OPT_PATH, QOBJECT(qstring_from_str(path)));
+
+    bs->full_open_options = opts;
+}
+
+
 static BlockDriver bdrv_gluster = {
     .format_name                  = "gluster",
     .protocol_name                = "gluster",
     .instance_size                = sizeof(BDRVGlusterState),
     .bdrv_needs_filename          = false,
+    .bdrv_refresh_filename        = gemu-gluster_refresh_filename,
     .bdrv_file_open               = qemu_gluster_open,
     .bdrv_reopen_prepare          = qemu_gluster_reopen_prepare,
     .bdrv_reopen_commit           = qemu_gluster_reopen_commit,
@@ -1318,6 +1381,7 @@ static BlockDriver bdrv_gluster_tcp = {
     .protocol_name                = "gluster+tcp",
     .instance_size                = sizeof(BDRVGlusterState),
     .bdrv_needs_filename          = false,
+    .bdrv_refresh_filename        = gemu-gluster_refresh_filename,
     .bdrv_file_open               = qemu_gluster_open,
     .bdrv_reopen_prepare          = qemu_gluster_reopen_prepare,
     .bdrv_reopen_commit           = qemu_gluster_reopen_commit,
@@ -1346,6 +1410,7 @@ static BlockDriver bdrv_gluster_unix = {
     .protocol_name                = "gluster+unix",
     .instance_size                = sizeof(BDRVGlusterState),
     .bdrv_needs_filename          = true,
+    .bdrv_refresh_filename        = gemu-gluster_refresh_filename,
     .bdrv_file_open               = qemu_gluster_open,
     .bdrv_reopen_prepare          = qemu_gluster_reopen_prepare,
     .bdrv_reopen_commit           = qemu_gluster_reopen_commit,
@@ -1380,6 +1445,7 @@ static BlockDriver bdrv_gluster_rdma = {
     .protocol_name                = "gluster+rdma",
     .instance_size                = sizeof(BDRVGlusterState),
     .bdrv_needs_filename          = true,
+    .bdrv_refresh_filename        = gemu-gluster_refresh_filename,
     .bdrv_file_open               = qemu_gluster_open,
     .bdrv_reopen_prepare          = qemu_gluster_reopen_prepare,
     .bdrv_reopen_commit           = qemu_gluster_reopen_commit,
